@@ -28,6 +28,7 @@ def clear_human_review_state():
     st.session_state.pending_interpreted_lc = None
     st.session_state.pending_session_id = None
     st.session_state.human_review_waiting = False
+    st.session_state.pending_mode = None
     if "comp_langchain_response" in st.session_state:
         del st.session_state.comp_langchain_response
 
@@ -90,6 +91,91 @@ def show_human_review_ui(mode: str):
             st.rerun()
 
 
+def render_comparison_review(session_id):
+    prompt = st.session_state.pending_query
+    interpreted_q_lg = st.session_state.pending_interpreted
+    full_response1 = st.session_state.get("comp_langchain_response", "")
+
+    st.markdown("---")
+    st.markdown("### Query Analysis")
+    
+    col_q1, col_q2 = st.columns(2)
+    with col_q1:
+        st.markdown("**LangChain Query**")
+        st.info(prompt)
+    with col_q2:
+        st.markdown("**LangGraph Query**")
+        st.info(interpreted_q_lg)
+    
+    col1, col2 = st.columns(2)
+    
+    # LEFT: LangChain (from storage or fresh run)
+    with col1:
+        st.markdown("### LangChain Response")
+        if full_response1:
+            st.markdown(full_response1)
+        else:
+            response_container1 = st.empty()
+            full_response1 = ""
+            for chunk in langchain_mode(prompt, session_id + "_lc"):
+                if isinstance(chunk, dict) and "__stats__" in chunk:
+                    pass
+                else:
+                    full_response1 += chunk
+                    response_container1.markdown(full_response1 + "▌")
+            response_container1.markdown(full_response1)
+            st.session_state.comp_langchain_response = full_response1
+    
+    # RIGHT: Human Review UI or LangGraph Response
+    with col2:
+        if "comp_langgraph_response" in st.session_state:
+            st.markdown("### LangGraph Response")
+            st.markdown(st.session_state.comp_langgraph_response)
+        else:
+            st.warning("Human Review Required")
+            edited_q = st.text_area("Edit query if needed:", value=interpreted_q_lg, height=80, key="comp_edit")
+            
+            col_p, col_c = st.columns([1, 1])
+            with col_p:
+                proceed_btn = st.button("Proceed", key="comp_proceed")
+            with col_c:
+                cancel_btn = st.button("Cancel", key="comp_cancel")
+            
+            if cancel_btn:
+                clear_human_review_state()
+                st.rerun()
+            
+            if proceed_btn:
+                actual_query = edited_q
+                st.markdown("### LangGraph Response")
+                response_container2 = st.empty()
+                full_response2 = ""
+                for chunk in langgraph_route_and_respond(prompt, session_id + "_lg", use_human_review=True, edited_query=actual_query):
+                    if isinstance(chunk, dict) and "__stats__" in chunk:
+                        pass
+                    else:
+                        full_response2 += chunk
+                        response_container2.markdown(full_response2 + "▌")
+                response_container2.markdown(full_response2)
+                st.session_state.comp_langgraph_response = full_response2
+                
+                # Store in messages
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": f"**Comparison Mode:**\n\n**LangChain:** {full_response1}\n\n---\n\n**LangGraph:** {full_response2}"
+                })
+                
+                # Cleanup and finish
+                if "comp_langgraph_response" in st.session_state:
+                    del st.session_state.comp_langgraph_response
+                clear_human_review_state()
+                st.rerun()
+
+
+if "pending_mode" not in st.session_state:
+    st.session_state.pending_mode = None
+
+
 def main():
     st.title("🤖 Benny AI - Unified Bot")
     
@@ -116,7 +202,10 @@ def main():
     
     # FIRST: Check if waiting for human review (handles rerun after button click)
     if st.session_state.human_review_waiting:
-        show_human_review_ui(mode)
+        if st.session_state.pending_mode == "Comparison":
+            render_comparison_review(session_id)
+        else:
+            show_human_review_ui(mode)
         return
     
     # NEW SUBMISSION: User submits new query
@@ -138,115 +227,26 @@ def main():
                 st.session_state.pending_query = prompt
                 st.session_state.pending_interpreted = interpreted_q
                 st.session_state.pending_session_id = session_id
+                st.session_state.pending_mode = "LangGraph"
                 st.session_state.human_review_waiting = True
-                show_human_review_ui(mode)
+                st.rerun()
             else:
                 run_langgraph_respond(prompt, session_id, interpreted_q)
         
         else:
             # Comparison mode
             if st.session_state.human_review_toggle:
-                # Check if we have pending data from previous run
-                if st.session_state.get("pending_query") == prompt:
-                    # Reuse stored interpreted queries
-                    interpreted_q_lg = st.session_state.pending_interpreted
-                    original_q_lg, interpreted_q_lc = prompt, prompt
-                else:
-                    # First time - get interpreted queries
-                    original_q_lc, interpreted_q_lc = rewrite_query_for_display(prompt, session_id + "_lc")
-                    original_q_lg, interpreted_q_lg = rewrite_query_for_display(prompt, session_id + "_lg")
-                    
-                    # Store in session state
-                    st.session_state.pending_query = prompt
-                    st.session_state.pending_interpreted = interpreted_q_lg
-                    st.session_state.pending_interpreted_lc = interpreted_q_lc
-                    st.session_state.pending_session_id = session_id + "_lg"
-                    st.session_state.human_review_waiting = True
+                original_q_lc, interpreted_q_lc = rewrite_query_for_display(prompt, session_id + "_lc")
+                original_q_lg, interpreted_q_lg = rewrite_query_for_display(prompt, session_id + "_lg")
                 
-                # Show comparison UI first
-                st.markdown("---")
-                st.markdown("### Query Analysis")
-                
-                col_q1, col_q2 = st.columns(2)
-                with col_q1:
-                    st.markdown("**LangChain Query**")
-                    st.info(prompt)
-                with col_q2:
-                    st.markdown("**LangGraph Query**")
-                    st.info(interpreted_q_lg)
-                
-                # Two columns: LEFT = LangChain, RIGHT = Human Review
-                col1, col2 = st.columns(2)
-                
-                # LEFT: Run LangChain IMMEDIATELY
-                with col1:
-                    st.markdown("### LangChain Response")
-                    # Check if we have a stored response
-                    if st.session_state.get("comp_langchain_response"):
-                        st.markdown(st.session_state.comp_langchain_response)
-                        full_response1 = st.session_state.comp_langchain_response
-                    else:
-                        response_container1 = st.empty()
-                        full_response1 = ""
-                        for chunk in langchain_mode(prompt, session_id + "_lc"):
-                            if isinstance(chunk, dict) and "__stats__" in chunk:
-                                pass
-                            else:
-                                full_response1 += chunk
-                                response_container1.markdown(full_response1 + "▌")
-                        response_container1.markdown(full_response1)
-                        st.session_state.comp_langchain_response = full_response1
-                
-                # RIGHT: Human Review UI
-                with col2:
-                    st.warning("Human Review Required")
-                    edited_q = st.text_area("Edit query if needed:", value=interpreted_q_lg, height=80, key="comp_edit")
-                    
-                    col_p, col_c = st.columns([1, 1])
-                    with col_p:
-                        proceed_btn = st.button("Proceed", key="comp_proceed")
-                    with col_c:
-                        cancel_btn = st.button("Cancel", key="comp_cancel")
-                    
-                    if cancel_btn:
-                        clear_human_review_state()
-                        if "comp_langchain_response" in st.session_state:
-                            del st.session_state.comp_langchain_response
-                        st.rerun()
-                    
-                    if proceed_btn:
-                        actual_query = edited_q
-                        
-                        # Create columns for both responses
-                        col_left, col_right = st.columns(2)
-                        
-                        # LEFT: LangChain (from storage)
-                        with col_left:
-                            st.markdown("### LangChain Response")
-                            st.markdown(st.session_state.comp_langchain_response)
-                        
-                        # RIGHT: LangGraph (fresh)
-                        with col_right:
-                            st.markdown("### LangGraph Response")
-                            response_container2 = st.empty()
-                            full_response2 = ""
-                            for chunk in langgraph_route_and_respond(prompt, session_id + "_lg", use_human_review=True, edited_query=actual_query):
-                                if isinstance(chunk, dict) and "__stats__" in chunk:
-                                    pass
-                                else:
-                                    full_response2 += chunk
-                                    response_container2.markdown(full_response2 + "▌")
-                            response_container2.markdown(full_response2)
-                        
-                        # Store in messages
-                        st.session_state.messages.append({
-                            "role": "assistant", 
-                            "content": f"**Comparison Mode:**\n\n**LangChain:** {full_response1}\n\n---\n\n**LangGraph:** {full_response2}"
-                        })
-                        
-                        clear_human_review_state()
-                        if "comp_langchain_response" in st.session_state:
-                            del st.session_state.comp_langchain_response
+                # Store in session state
+                st.session_state.pending_query = prompt
+                st.session_state.pending_interpreted = interpreted_q_lg
+                st.session_state.pending_interpreted_lc = interpreted_q_lc
+                st.session_state.pending_session_id = session_id
+                st.session_state.pending_mode = "Comparison"
+                st.session_state.human_review_waiting = True
+                st.rerun()
             else:
                 run_comparison(prompt, session_id)
 
