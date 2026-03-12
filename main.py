@@ -12,6 +12,8 @@ from src.langchain import langchain_mode
 from src.agent import langgraph_route_and_respond
 from src.vectorstores.creator import create_vector_store
 from src.config import VALID_CATEGORIES
+from src.langchain.utils import rewrite_query
+from src.langchain.history import get_session_history
 
 app = FastAPI(title="Benny AI Backend")
 
@@ -28,6 +30,10 @@ class ChatRequest(BaseModel):
     mode: str  # "LangChain" or "LangGraph"
     use_human_review: bool = False
     edited_query: Optional[str] = None
+
+class RewriteRequest(BaseModel):
+    query: str
+    session_id: str
 
 class AdminLoginRequest(BaseModel):
     email: str
@@ -74,6 +80,22 @@ async def chat(request: ChatRequest):
             yield f"Error: {str(e)}"
 
     return StreamingResponse(stream_response(), media_type="text/plain")
+
+@app.post("/rewrite")
+async def rewrite_endpoint(request: RewriteRequest):
+    try:
+        history = get_session_history(request.session_id)
+        history_messages = history.messages
+        
+        history_str = "\n".join(
+            f"{'User' if m.type == 'human' else 'Assistant'}: {m.content}"
+            for m in history_messages
+        )
+        
+        rewritten = rewrite_query(request.query, history_str)
+        return {"rewritten_query": rewritten}
+    except Exception as e:
+        return {"rewritten_query": request.query}
 
 @app.post("/admin/login")
 async def admin_login(request: AdminLoginRequest):

@@ -9,18 +9,10 @@ from src.langchain.history import get_session_history
 from src.vectorstores import load_vector_store
 from src.config import VALID_CATEGORIES
 from src.embeddings import embedding
-from src.agent.prompts import router_template, query_rewriter_template
+from src.langchain.utils import rewrite_query
 from src.agent.states.states import Route1
 
 
-def rewrite_query(query: str, history_str: str):
-    from langchain_core.output_parsers import StrOutputParser
-    rewriter_chain = query_rewriter_template | llm | StrOutputParser()
-    interpreted = rewriter_chain.invoke({
-        "user_input": query,
-        "history": history_str
-    })
-    return interpreted.strip().split('\n')[0]
 
 
 def route_to_category(query: str, history_str: str):

@@ -94,32 +94,3 @@ Your Answer:""",
     input_variables=["context", "history", "user_input"]
 )
 
-query_rewriter_template = PromptTemplate(
-    template="""
-You are a strict Question Rewriter for Bennett University's chatbot.
-
-Your job is to rewrite the latest user message into a clear standalone question
-WITHOUT changing its meaning, tone, format, or constraints.
-
-CRITICAL RULES:
-
-1. Do NOT answer the question.
-2. Do NOT add new information.
-3. Do NOT remove constraints (e.g., "5 lines", "briefly", "in 100 words").
-4. Do NOT change perspective (e.g., keep "you" if user says "you").
-5. Do NOT make it more formal unless necessary for clarity.
-6. Only resolve unclear references using conversation history.
-7. If the question is already clear and standalone, return it exactly as is.
-8. Do NOT reinterpret intent.
-9. Keep wording as close as possible to the original.
-
-Conversation History:
-{history}
-
-Latest User Message:
-{user_input}
-
-Rewritten Standalone Question (minimal changes only):
-""",
-    input_variables=["history", "user_input"]
-)

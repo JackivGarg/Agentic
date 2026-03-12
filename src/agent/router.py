@@ -2,20 +2,14 @@ import time
 from langchain_core.output_parsers import StrOutputParser
 
 from src.llm import llm
-from src.agent.prompts import router_template, generate_template, query_rewriter_template
+from src.agent.prompts import router_template, generate_template
 from src.agent.states.states import Route1
 from src.langchain.history import get_session_history
 from src.vectorstores import load_vector_store
 from src.config import VALID_CATEGORIES
 
 
-def rewrite_query(query: str, history_str: str):
-    rewriter_chain = query_rewriter_template | llm | StrOutputParser()
-    interpreted = rewriter_chain.invoke({
-        "user_input": query,
-        "history": history_str
-    })
-    return interpreted.strip().split('\n')[0]
+from src.langchain.utils import rewrite_query
 
 
 def langgraph_route_and_respond(query: str, session_id: str, use_human_review: bool = False, edited_query: str = None):

@@ -60,6 +60,16 @@ def call_chat_api(query, session_id, mode, use_human_review=False, edited_query=
         st.error(f"API Error: {str(e)}")
         yield f" Error connecting to backend: {str(e)}"
 
+def get_rewritten_query(query: str, session_id: str) -> str:
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            res = client.post(f"{API_URL}/rewrite", json={"query": query, "session_id": session_id})
+            if res.status_code == 200:
+                return res.json().get("rewritten_query", query)
+    except Exception as e:
+        st.error(f"Error fetching rewrite: {e}")
+    return query
+
 def display_query_box(original: str, interpreted: str):
     col1, col2 = st.columns(2)
     with col1:
@@ -224,7 +234,7 @@ def admin_sidebar():
                     "email": ADMIN_CREDENTIALS["email"],
                     "password": ADMIN_CREDENTIALS["password"]
                 }
-                with httpx.Client() as client:
+                with httpx.Client(timeout=120.0) as client:
                     res = client.post(f"{API_URL}/admin/add_content", json=payload)
                     if res.status_code == 200:
                         st.sidebar.success("Content added successfully!")
@@ -239,7 +249,7 @@ def admin_sidebar():
                     "email": ADMIN_CREDENTIALS["email"],
                     "password": ADMIN_CREDENTIALS["password"]
                 }
-                with httpx.Client() as client:
+                with httpx.Client(timeout=120.0) as client:
                     res = client.post(f"{API_URL}/admin/refresh?category={category}", json=payload)
                     if res.status_code == 200:
                         st.sidebar.success(f"{category} store refreshed!")
@@ -284,10 +294,9 @@ def main():
             run_langchain(prompt, session_id)
         elif mode == "LangGraph":
             if st.session_state.human_review_toggle:
-                # We'll just assume interpretation is done on server or handle it
-                # For simplicity, we'll mark as waiting
+                interpreted_q = get_rewritten_query(prompt, session_id)
                 st.session_state.pending_query = prompt
-                st.session_state.pending_interpreted = prompt # Fallback
+                st.session_state.pending_interpreted = interpreted_q
                 st.session_state.pending_session_id = session_id
                 st.session_state.pending_mode = "LangGraph"
                 st.session_state.human_review_waiting = True
@@ -296,8 +305,9 @@ def main():
                 run_langgraph_respond(prompt, session_id, prompt)
         else:
             if st.session_state.human_review_toggle:
+                interpreted_q = get_rewritten_query(prompt, session_id)
                 st.session_state.pending_query = prompt
-                st.session_state.pending_interpreted = prompt
+                st.session_state.pending_interpreted = interpreted_q
                 st.session_state.pending_session_id = session_id
                 st.session_state.pending_mode = "Comparison"
                 st.session_state.human_review_waiting = True
